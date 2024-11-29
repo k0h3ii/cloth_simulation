@@ -1,6 +1,8 @@
 import './style.css'
 import * as THREE from 'three';
 import {OrbitControls} from 'three/examples/jsm/controls/OrbitControls';
+import { Light } from 'three';
+import * as dat from 'dat.gui';
 
 // scene, camera, renderer
 const scene = new THREE.Scene()
@@ -25,8 +27,10 @@ const cylinder = new THREE.Mesh(geometry,material);
 scene.add(cylinder)
 
 // lighting
+const pointLight = new THREE.PointLight(0xffffff,1);
+pointLight.position.set(10,10,10);
 const ambientLight = new THREE.AmbientLight(0xffffff);
-scene.add(ambientLight)
+scene.add(ambientLight, pointLight)
 
 // helper functions
 const gridHelper = new THREE.GridHelper(200,50);
