@@ -35,16 +35,38 @@ groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
 
 // Cylinder dimensions
 const outerRadius = 5;
-const innerRadius = 1.5;
-const cylinderHeight = 20;
+let innerRadius = 1.5;
+let cylinderHeight = 40;
 
-// Add rigid cylinder body
+// Function to update inner cylinder
+function updateInnerCylinder(radius, height) {
+  // Remove old cylinder body
+  world.removeBody(cylinderBody);
+  
+  // Create new cylinder shape and body
+  const newCylinderShape = new CANNON.Cylinder(radius, radius, height, 16);
+  cylinderBody.shapes = [newCylinderShape];
+  cylinderBody.position.y = height/2;
+  
+  // Add body back to world
+  world.addBody(cylinderBody);
+  
+  // Update visual mesh
+  scene.remove(innerCylinderMesh);
+  const newCylinderGeo = new THREE.CylinderGeometry(radius, radius, height, 32);
+  innerCylinderMesh.geometry.dispose();
+  innerCylinderMesh.geometry = newCylinderGeo;
+  innerCylinderMesh.position.y = height/2;
+  scene.add(innerCylinderMesh);
+}
+
+// Modified cylinder body setup
 const cylinderShape = new CANNON.Cylinder(innerRadius, innerRadius, cylinderHeight, 16);
 const cylinderBody = new CANNON.Body({
-    mass: 0,
-    material: cylinderMaterial,
-    shape: cylinderShape,
-    position: new CANNON.Vec3(0, cylinderHeight/2, 0)
+  mass: 0,
+  material: cylinderMaterial,
+  shape: cylinderShape,
+  position: new CANNON.Vec3(0, cylinderHeight/2, 0)
 });
 world.addBody(cylinderBody);
 
@@ -58,34 +80,49 @@ let constraints = [];
 const particleRadius = 0.2;
 const particleShape = new CANNON.Sphere(particleRadius);
 const particles = [];
+let topParticles = []; // Array to store top boundary particles
 
 // Create a cylindrical grid of particles
 function createCylindricalGrid() {
-    for (let i = 0; i < Nx; i++) {
-        particles.push([]);
-        for (let j = 0; j < Ny + 1; j++) {
-            const angle = (i / Nx) * Math.PI * 2;
-            const height = (j / Ny) * cylinderHeight;
+  for (let i = 0; i < Nx; i++) {
+      particles.push([]);
+      for (let j = 0; j < Ny + 1; j++) {
+          const angle = (i / Nx) * Math.PI * 2;
+          const height = (j / Ny) * cylinderHeight;
 
-            const particle = new CANNON.Body({
-                mass: mass,
-                material: particleMaterial,
-                shape: particleShape,
-                position: new CANNON.Vec3(
-                    outerRadius * Math.cos(angle),
-                    height,
-                    outerRadius * Math.sin(angle)
-                )
-            });
-            
-            particle.linearDamping = 0.5;
-            particle.allowSleep = false;
-            particles[i].push(particle);
-            world.addBody(particle);
-        }
-    }
+          const particle = new CANNON.Body({
+              mass: j === Ny ? 0 : mass, // Make top row particles static
+              material: particleMaterial,
+              shape: particleShape,
+              position: new CANNON.Vec3(
+                  outerRadius * Math.cos(angle),
+                  height,
+                  outerRadius * Math.sin(angle)
+              )
+          });
+          
+          particle.linearDamping = 0.5;
+          particle.allowSleep = false;
+          particles[i].push(particle);
+          world.addBody(particle);
 
-    particles.push(particles[0]);
+          // Store top boundary particles
+          if (j === Ny) {
+              topParticles.push(particle);
+          }
+      }
+  }
+
+  particles.push(particles[0]);
+}
+
+// Function to update top boundary height
+function updateTopBoundaryHeight(height) {
+  topParticles.forEach(particle => {
+      const currentPos = particle.position;
+      particle.position.set(currentPos.x, height, currentPos.z);
+      particle.velocity.set(0, 0, 0); // Reset velocity
+  });
 }
 
 // Create constraints between particles
@@ -289,7 +326,10 @@ const options = {
     clothOpacity: 0.8,
     friction: 0.5,
     restitution: 0.0,
-    preset: 'normal'
+    preset: 'normal',
+    tubeHeight: cylinderHeight,
+    innerRadius: innerRadius,
+    innerHeight: cylinderHeight
 };
 
 gui.addColor(options, 'clothColor').onChange(function(e) {
@@ -316,7 +356,7 @@ gui.add(options, 'damping', 0, 1).onChange(function(e) {
     });
 });
 
-gui.add(options, 'stiffness', 0, 5000).onChange(function(e) {
+gui.add(options, 'stiffness', 0, 50000).onChange(function(e) {
     constraints.forEach(constraint => {
         constraint.stiffness = e;
     });
@@ -366,26 +406,41 @@ gui.add(options, 'preset', ['soft', 'normal', 'rigid']).onChange(function(e) {
     }
 });
 
+gui.add(options, 'tubeHeight', 10, cylinderHeight * 1.2).onChange(function(e) {
+  updateTopBoundaryHeight(e);
+});
+
+gui.add(options, 'innerRadius', 0.5, outerRadius - 1).onChange(function(e) {
+  innerRadius = e;
+  updateInnerCylinder(innerRadius, options.innerHeight);
+});
+
+gui.add(options, 'innerHeight', 10, cylinderHeight * 1.5).onChange(function(e) {
+  cylinderHeight = e;
+  updateInnerCylinder(options.innerRadius, cylinderHeight);
+});
+
+
 // Animation loop
 function animate() {
-    requestAnimationFrame(animate);
-    
-    const timeStep = 1/120;
-    world.step(timeStep);
-    
-    updateParticles();
-    
-    clothMesh.geometry.attributes.position.needsUpdate = true;
-    wireframe.geometry = new THREE.WireframeGeometry(clothMesh.geometry);
-    
-    groundMesh.position.copy(groundBody.position);
-    groundMesh.quaternion.copy(groundBody.quaternion);
-    
-    innerCylinderMesh.position.copy(cylinderBody.position);
-    innerCylinderMesh.quaternion.copy(cylinderBody.quaternion);
-    
-    renderer.render(scene, camera);
-    controls.update();
+  requestAnimationFrame(animate);
+  
+  const timeStep = 1/120;
+  world.step(timeStep);
+  
+  updateParticles();
+  
+  clothMesh.geometry.attributes.position.needsUpdate = true;
+  wireframe.geometry = new THREE.WireframeGeometry(clothMesh.geometry);
+  
+  groundMesh.position.copy(groundBody.position);
+  groundMesh.quaternion.copy(groundBody.quaternion);
+  
+  innerCylinderMesh.position.copy(cylinderBody.position);
+  innerCylinderMesh.quaternion.copy(cylinderBody.quaternion);
+  
+  renderer.render(scene, camera);
+  controls.update();
 }
 
 animate();
