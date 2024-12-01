@@ -71,10 +71,10 @@ const cylinderBody = new CANNON.Body({
 world.addBody(cylinderBody);
 
 // Cloth parameters
-const Nx = 30;
-const Ny = 30;
+let Nx = 30;
+let Ny = 30;
 const mass = 0.1;
-const dist = (2 * Math.PI * outerRadius) / Nx;
+let dist = (2 * Math.PI * outerRadius) / Nx;
 
 let constraints = [];
 const particleRadius = 0.2;
@@ -124,6 +124,81 @@ function updateTopBoundaryHeight(height) {
       particle.velocity.set(0, 0, 0); // Reset velocity
   });
 }
+function removeExistingCloth() {
+  // Remove all particles from the world
+  particles.forEach(row => {
+      row.forEach(particle => {
+          world.removeBody(particle);
+      });
+  });
+  
+  // Remove all constraints
+  constraints.forEach(constraint => {
+      world.removeConstraint(constraint);
+  });
+  
+  // Clear arrays
+  particles.length = 0;
+  constraints.length = 0;
+  topParticles.length = 0;
+}
+
+function resetClothSimulation(newNx, newNy) {
+  // Remove existing cloth
+  removeExistingCloth();
+  
+  // Update global variables
+  Nx = newNx;
+  Ny = newNy;
+  
+  // Recalculate distance between particles
+  dist = (2 * Math.PI * outerRadius) / Nx;
+  
+  // Create new geometry
+  const positions = new Float32Array(Nx * (Ny + 1) * 3);
+  const indices = [];
+  const uvs = new Float32Array(Nx * (Ny + 1) * 2);
+
+  // Initialize vertex positions
+  for (let i = 0; i < Nx; i++) {
+      for (let j = 0; j < Ny + 1; j++) {
+          const index = (j * Nx + i) * 3;
+          const angle = (i / Nx) * Math.PI * 2;
+          
+          positions[index] = outerRadius * Math.cos(angle);
+          positions[index + 1] = (j / Ny) * cylinderHeight;
+          positions[index + 2] = outerRadius * Math.sin(angle);
+
+          const uvIndex = (j * Nx + i) * 2;
+          uvs[uvIndex] = i / Nx;
+          uvs[uvIndex + 1] = j / Ny;
+      }
+  }
+
+  // Create triangles with proper wrapping
+  for (let i = 0; i < Nx; i++) {
+      for (let j = 0; j < Ny; j++) {
+          const current = j * Nx + i;
+          const next = j * Nx + ((i + 1) % Nx);
+          const bottom = ((j + 1) * Nx + i);
+          const bottomNext = ((j + 1) * Nx + ((i + 1) % Nx));
+
+          indices.push(current, bottomNext, bottom);
+          indices.push(current, next, bottomNext);
+      }
+  }
+
+  // Update geometry
+  clothGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  clothGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  clothGeo.setIndex(indices);
+  clothGeo.computeVertexNormals();
+
+  // Create new cloth physics
+  createCylindricalGrid();
+  createConstraints();
+}
+
 
 // Create constraints between particles
 function createConstraints() {
@@ -186,7 +261,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
-camera.position.set(0, 20, 50);
+camera.position.set(0, 50, 100);
 
 const renderer = new THREE.WebGLRenderer({
     canvas: document.querySelector('#bg'),
@@ -329,7 +404,9 @@ const options = {
     preset: 'normal',
     tubeHeight: cylinderHeight,
     innerRadius: innerRadius,
-    innerHeight: cylinderHeight
+    innerHeight: cylinderHeight,
+    heightSegments: Ny,
+    radiusSegments: Nx
 };
 
 gui.addColor(options, 'clothColor').onChange(function(e) {
@@ -420,6 +497,13 @@ gui.add(options, 'innerHeight', 10, cylinderHeight * 1.5).onChange(function(e) {
   updateInnerCylinder(options.innerRadius, cylinderHeight);
 });
 
+gui.add(options, 'radiusSegments', 10, 50).step(1).onChange(function(e) {
+  resetClothSimulation(Math.floor(e), options.heightSegments);
+});
+
+gui.add(options, 'heightSegments', 10, 50).step(1).onChange(function(e) {
+  resetClothSimulation(options.radiusSegments, Math.floor(e));
+});
 
 // Animation loop
 function animate() {
