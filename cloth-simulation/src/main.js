@@ -274,7 +274,95 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 const pointLight = new THREE.PointLight(0xffffff, 10);
 pointLight.position.set(10, 10, 10);
 const ambientLight = new THREE.AmbientLight(0xffffff, 5);
-scene.add(ambientLight, pointLight);
+const dirLight = new THREE.DirectionalLight(0xffffff, 5);
+dirLight.position.set(0, 20, 10);
+const dirLightHelper = new THREE.DirectionalLightHelper(dirLight);
+scene.add(ambientLight, pointLight, dirLight, dirLightHelper);
+
+const lightSphereGeo = new THREE.SphereGeometry(1, 16, 16);
+const lightSphereMat = new THREE.MeshBasicMaterial({ 
+    color: 0xffff00,
+    transparent: true,
+    opacity: 0.5
+});
+const lightSphere = new THREE.Mesh(lightSphereGeo, lightSphereMat);
+lightSphere.position.copy(dirLight.position);
+scene.add(lightSphere);
+
+// Raycaster for mouse interaction
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let isDragging = false;
+let selectedObject = null;
+const dragPlane = new THREE.Plane();
+const intersection = new THREE.Vector3();
+
+// Mouse event handlers
+window.addEventListener('mousedown', onMouseDown);
+window.addEventListener('mousemove', onMouseMove);
+window.addEventListener('mouseup', onMouseUp);
+
+function onMouseDown(event) {
+    // Calculate mouse position
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    // Check for intersection with light sphere
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(lightSphere);
+
+    if (intersects.length > 0) {
+        controls.enabled = false; // Disable orbit controls while dragging
+        isDragging = true;
+        selectedObject = lightSphere;
+
+        // Create drag plane perpendicular to camera
+        const normal = camera.getWorldDirection(new THREE.Vector3());
+        dragPlane.setFromNormalAndCoplanarPoint(
+            normal,
+            selectedObject.position
+        );
+    }
+}
+
+function onMouseMove(event) {
+    if (!isDragging || !selectedObject) return;
+
+    // Update mouse position
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    // Update raycaster
+    raycaster.setFromCamera(mouse, camera);
+
+    // Find intersection with drag plane
+    if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
+        // Move light sphere to intersection point
+        selectedObject.position.copy(intersection);
+        
+        // Update directional light position
+        dirLight.position.copy(intersection);
+        dirLightHelper.update();
+
+        // Update GUI values
+        for (let controller of dirLightFolder.__controllers) {
+            if (controller.property === 'x') {
+                controller.setValue(intersection.x);
+            } else if (controller.property === 'y') {
+                controller.setValue(intersection.y);
+            } else if (controller.property === 'z') {
+                controller.setValue(intersection.z);
+            }
+        }
+    }
+}
+
+function onMouseUp() {
+    isDragging = false;
+    selectedObject = null;
+    controls.enabled = true; // Re-enable orbit controls
+}
+
 
 // Ground
 const groundGeo = new THREE.PlaneGeometry(30, 30);
@@ -406,7 +494,19 @@ const options = {
     innerRadius: innerRadius,
     innerHeight: cylinderHeight,
     heightSegments: Ny,
-    radiusSegments: Nx
+    radiusSegments: Nx,
+    dirLight: {
+        visible: true,
+        intensity: 5,
+        position: {
+            x: 0,
+            y: 20,
+            z: 10
+        }
+    },
+    reset: function() {
+        resetClothSimulation(options.radiusSegments, options.heightSegments);
+    }
 };
 
 gui.addColor(options, 'clothColor').onChange(function(e) {
@@ -505,6 +605,42 @@ gui.add(options, 'heightSegments', 10, 50).step(1).onChange(function(e) {
   resetClothSimulation(options.radiusSegments, Math.floor(e));
 });
 
+gui.add(options, 'reset').name('Reset Simulation');
+
+const dirLightFolder = gui.addFolder('Directional Light');
+
+dirLightFolder.add(options.dirLight, 'visible').onChange(function(e) {
+    dirLight.visible = e;
+    dirLightHelper.visible = e;
+});
+
+dirLightFolder.add(options.dirLight, 'intensity', 0, 10).onChange(function(e) {
+    dirLight.intensity = e;
+});
+
+dirLightFolder.add(options.dirLight.position, 'x', -50, 50).onChange(function(e) {
+    dirLight.position.x = e;
+    dirLightHelper.update();
+});
+
+dirLightFolder.add(options.dirLight.position, 'y', -50, 50).onChange(function(e) {
+    dirLight.position.y = e;
+    dirLightHelper.update();
+});
+
+dirLightFolder.add(options.dirLight.position, 'z', -50, 50).onChange(function(e) {
+    dirLight.position.z = e;
+    dirLightHelper.update();
+});
+
+dirLightFolder.add({ showLightSphere: true }, 'showLightSphere')
+    .name('Show Light Control')
+    .onChange(function(value) {
+        lightSphere.visible = value && dirLight.visible;
+    });
+
+dirLightFolder.open();
+
 // Animation loop
 function animate() {
   requestAnimationFrame(animate);
@@ -522,6 +658,8 @@ function animate() {
   
   innerCylinderMesh.position.copy(cylinderBody.position);
   innerCylinderMesh.quaternion.copy(cylinderBody.quaternion);
+
+  lightSphere.visible = dirLight.visible;
   
   renderer.render(scene, camera);
   controls.update();
