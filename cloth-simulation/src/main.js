@@ -21,14 +21,12 @@ const options = {
   // Physics
   gravity: -9.81,
   damping: 0.5,
-  stiffness: 1e6,
   relaxation: 3,
   friction: 0.5,
   restitution: 0.0,
-  preset: 'normal',
   
   // Geometry
-  tubeHeight: cylinderHeight,
+  crushTube: cylinderHeight,
   innerRadius: innerRadius,
   innerHeight: cylinderHeight,
   heightSegments: Ny,
@@ -36,7 +34,7 @@ const options = {
   
   // Lighting
   dirLight: {
-      visible: true,
+      on: true,
       intensity: 5,
       position: {
           x: 0,
@@ -63,7 +61,6 @@ const world = new CANNON.World({
     gravity: new CANNON.Vec3(0, -9.81, 0)
 });
 world.solver.iterations = 20;
-world.defaultContactMaterial.contactEquationStiffness = 1e6;
 world.defaultContactMaterial.contactEquationRelaxation = 3;
 
 // Materials
@@ -73,7 +70,6 @@ const cylinderMaterial = new CANNON.Material('cylinder');
 const contactMaterial = new CANNON.ContactMaterial(particleMaterial, cylinderMaterial, {
     friction: 0.5,
     restitution: 0.0,
-    contactEquationStiffness: 1e6,
     contactEquationRelaxation: 3
 });
 world.addContactMaterial(contactMaterial);
@@ -406,7 +402,7 @@ function onMouseUp() {
 // Ground
 const groundGeo = new THREE.PlaneGeometry(30, 30);
 const groundMat = new THREE.MeshStandardMaterial({
-    color: 0x888888,
+    color: 0x393939,
     side: THREE.DoubleSide
 });
 const groundMesh = new THREE.Mesh(groundGeo, groundMat);
@@ -531,19 +527,19 @@ const orthoCamera = new THREE.OrthographicCamera(
 orthoCamera.position.z = 1;
 orthoScene.add(heatmapQuad);
 
+const standardClothMat = new THREE.MeshStandardMaterial({
+  color: options.clothColor,
+  side: THREE.DoubleSide,
+  transparent: true,
+  opacity: options.clothOpacity,
+  wireframe: false
+});
 
-const clothMatUniforms = {
-  minColor: { value: new THREE.Color(options.heatmap.minColor) },
-  maxColor: { value: new THREE.Color(options.heatmap.maxColor) },
-  bendingValues: { value: new Float32Array(Nx * (Ny + 1)) },
-  useHeatmap: { value: false }
-};
-
-const clothMat = new THREE.ShaderMaterial({
+const heatmapClothMat = new THREE.ShaderMaterial({
   uniforms: {
       minColor: { value: new THREE.Color(options.heatmap.minColor) },
       maxColor: { value: new THREE.Color(options.heatmap.maxColor) },
-      useHeatmap: { value: false },
+      useHeatmap: { value: true }, // Always true for this material
       opacity: { value: options.clothOpacity },
       scale: { value: options.heatmap.scale }
   },
@@ -559,7 +555,6 @@ const clothMat = new THREE.ShaderMaterial({
   fragmentShader: `
       uniform vec3 minColor;
       uniform vec3 maxColor;
-      uniform bool useHeatmap;
       uniform float opacity;
       varying float vBending;
 
@@ -570,22 +565,14 @@ const clothMat = new THREE.ShaderMaterial({
       }
 
       void main() {
-          if (useHeatmap) {
-              // Create a smoother gradient using HSV color space
-              float value = clamp(vBending, 0.0, 1.0);
-              
-              // Create a rainbow gradient from blue (cold) to red (hot)
-              vec3 hsvColor = vec3(
-                  (1.0 - value) * 0.6,  // Hue: 0.6 (blue) to 0.0 (red)
-                  0.8,                   // Saturation
-                  mix(0.7, 1.0, value)   // Value/Brightness
-              );
-              
-              vec3 color = hsv2rgb(hsvColor);
-              gl_FragColor = vec4(color, opacity);
-          } else {
-              gl_FragColor = vec4(0.8, 0.2, 0.1, opacity);
-          }
+          float value = clamp(vBending, 0.0, 1.0);
+          vec3 hsvColor = vec3(
+              (1.0 - value) * 0.6,
+              0.8,
+              mix(0.7, 1.0, value)
+          );
+          vec3 color = hsv2rgb(hsvColor);
+          gl_FragColor = vec4(color, opacity);
       }
   `,
   side: THREE.DoubleSide,
@@ -660,7 +647,7 @@ function calculateBending() {
   heatmapTexture.needsUpdate = true;
 }
 
-const clothMesh = new THREE.Mesh(clothGeo, clothMat);
+const clothMesh = new THREE.Mesh(clothGeo, standardClothMat);
 scene.add(clothMesh);
 
 // Wireframe
@@ -699,10 +686,14 @@ const controls = new OrbitControls(camera, renderer.domElement);
 // GUI
 const gui = new dat.GUI();
 
+gui.add(options, 'crushTube', 10, cylinderHeight * 1.2).onChange(function(e) {
+  updateTopBoundaryHeight(e);
+});
+
 // Appearance folder
 const appearanceFolder = gui.addFolder('Appearance');
 appearanceFolder.addColor(options, 'clothColor').onChange(function(e) {
-    clothMesh.material.color.set(e);
+    standardClothMat.color.set(e);
 });
 appearanceFolder.addColor(options, 'innerColor').onChange(function(e) {
     innerCylinderMesh.material.color.set(e);
@@ -711,16 +702,16 @@ appearanceFolder.add(options, 'wireframe').onChange(function(e) {
     wireframe.visible = e;
 });
 appearanceFolder.add(options, 'clothOpacity', 0, 1).onChange(function(e) {
-  clothMat.uniforms.opacity.value = e;
+  standardClothMat.opacity = e;
+  heatmapClothMat.uniforms.opacity.value = e;
 });
 appearanceFolder.add(options, 'innerOpacity', 0, 1).onChange(function(e) {
   innerCylinderMesh.material.opacity = e;
 });
-appearanceFolder.open();
 
 // Physics folder
 const physicsFolder = gui.addFolder('Physics');
-physicsFolder.add(options, 'gravity', -20, 0).onChange(function(e) {
+physicsFolder.add(options, 'gravity', -100, 0).onChange(function(e) {
     world.gravity.y = e;
 });
 physicsFolder.add(options, 'damping', 0, 1).onChange(function(e) {
@@ -729,10 +720,6 @@ physicsFolder.add(options, 'damping', 0, 1).onChange(function(e) {
             particle.linearDamping = e;
         });
     });
-});
-physicsFolder.add(options, 'stiffness', 1e4, 1e7).onChange(function(e) {
-    contactMaterial.contactEquationStiffness = e;
-    world.defaultContactMaterial.contactEquationStiffness = e;
 });
 physicsFolder.add(options, 'relaxation', 1, 10).onChange(function(e) {
     contactMaterial.contactEquationRelaxation = e;
@@ -744,39 +731,10 @@ physicsFolder.add(options, 'friction', 0, 1).onChange(function(e) {
 physicsFolder.add(options, 'restitution', 0, 1).onChange(function(e) {
     contactMaterial.restitution = e;
 });
-physicsFolder.add(options, 'preset', ['soft', 'normal', 'rigid']).onChange(function(e) {
-    switch(e) {
-        case 'soft':
-            options.stiffness = 1e4;
-            options.relaxation = 3;
-            break;
-        case 'normal':
-            options.stiffness = 1e6;
-            options.relaxation = 3;
-            break;
-        case 'rigid':
-            options.stiffness = 1e7;
-            options.relaxation = 2;
-            break;
-    }
-    
-    contactMaterial.contactEquationStiffness = options.stiffness;
-    world.defaultContactMaterial.contactEquationStiffness = options.stiffness;
-    contactMaterial.contactEquationRelaxation = options.relaxation;
-    world.defaultContactMaterial.contactEquationRelaxation = options.relaxation;
-    
-    // Update GUI display
-    for (let controller of gui.__controllers) {
-        controller.updateDisplay();
-    }
-});
-physicsFolder.open();
 
 // Geometry folder
 const geometryFolder = gui.addFolder('Geometry');
-geometryFolder.add(options, 'tubeHeight', 10, cylinderHeight * 1.2).onChange(function(e) {
-    updateTopBoundaryHeight(e);
-});
+
 geometryFolder.add(options, 'innerRadius', 0.5, outerRadius - 1).onChange(function(e) {
     innerRadius = e;
     updateInnerCylinder(innerRadius, options.innerHeight);
@@ -791,11 +749,10 @@ geometryFolder.add(options, 'radiusSegments', 10, 50).step(1).onChange(function(
 geometryFolder.add(options, 'heightSegments', 10, 50).step(1).onChange(function(e) {
     resetClothSimulation(options.radiusSegments, Math.floor(e));
 });
-geometryFolder.open();
 
 // Lighting folder
 const lightingFolder = gui.addFolder('Lighting');
-lightingFolder.add(options.dirLight, 'visible').onChange(function(e) {
+lightingFolder.add(options.dirLight, 'on').onChange(function(e) {
     dirLight.visible = e;
     dirLightHelper.visible = e;
 });
@@ -816,47 +773,43 @@ lightPositionFolder.add(options.dirLight.position, 'z', -50, 50).onChange(functi
     dirLight.position.z = e;
     dirLightHelper.update();
 });
-lightingFolder.add({ showLightSphere: true }, 'showLightSphere')
-    .name('Show Light Control')
-    .onChange(function(value) {
-        lightSphere.visible = value && dirLight.visible;
-    });
-lightingFolder.open();
 
 const heatmapFolder = gui.addFolder('Heat Map');
 heatmapFolder.add(options.heatmap, 'enabled')
     .name('Show Heat Map')
     .onChange(function(value) {
-        clothMat.uniforms.useHeatmap.value = value;
-        heatmapQuad.visible = value;
+        if (value) {
+            clothMesh.material = heatmapClothMat;
+            heatmapQuad.visible = true;
+        } else {
+            clothMesh.material = standardClothMat;
+            heatmapQuad.visible = false;
+        }
     });
 
 heatmapFolder.addColor(options.heatmap, 'minColor')
     .name('Min Bend Color')
     .onChange(function(value) {
-        clothMat.uniforms.minColor.value.set(value);
+        heatmapClothMat.uniforms.minColor.value.set(value);
         heatmapQuadMat.uniforms.minColor.value.set(value);
     });
 
 heatmapFolder.addColor(options.heatmap, 'maxColor')
     .name('Max Bend Color')
     .onChange(function(value) {
-        clothMat.uniforms.maxColor.value.set(value);
+        heatmapClothMat.uniforms.maxColor.value.set(value);
         heatmapQuadMat.uniforms.maxColor.value.set(value);
     });
 
-    heatmapFolder.add(options.heatmap, 'scale', 0.1, )
+heatmapFolder.add(options.heatmap, 'scale', 0.1, 5)
     .name('Sensitivity')
     .onChange(function(value) {
-        clothMat.uniforms.scale.value = value;
+        heatmapClothMat.uniforms.scale.value = value;
     });
 
-heatmapFolder.open();
 
 // Actions
 gui.add(options, 'reset').name('Reset Simulation');
-
-gui.remember(options);
 
 // Animation loop
 function animate() {
