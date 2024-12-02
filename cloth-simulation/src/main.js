@@ -61,7 +61,7 @@ function updateInnerCylinder(radius, height) {
 }
 
 // Modified cylinder body setup
-const cylinderShape = new CANNON.Cylinder(innerRadius, innerRadius, cylinderHeight, 16);
+const cylinderShape = new CANNON.Cylinder(innerRadius + 0.1, innerRadius + 0.1, cylinderHeight, 32);
 const cylinderBody = new CANNON.Body({
   mass: 0,
   material: cylinderMaterial,
