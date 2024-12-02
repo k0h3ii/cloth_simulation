@@ -4,6 +4,60 @@ import {OrbitControls} from 'three/examples/jsm/controls/OrbitControls';
 import * as dat from 'dat.gui';
 import * as CANNON from 'cannon-es';
 
+const outerRadius = 5;
+let innerRadius = 1.5;
+let cylinderHeight = 40;
+let Nx = 30;
+let Ny = 30;
+
+const options = {
+  // Appearance
+  clothColor: '#ff6347',
+  innerColor: '#444444',
+  wireframe: true,
+  clothOpacity: 0.8,
+  innerOpacity: 1.0,
+  
+  // Physics
+  gravity: -9.81,
+  damping: 0.5,
+  stiffness: 1e6,
+  relaxation: 3,
+  friction: 0.5,
+  restitution: 0.0,
+  preset: 'normal',
+  
+  // Geometry
+  tubeHeight: cylinderHeight,
+  innerRadius: innerRadius,
+  innerHeight: cylinderHeight,
+  heightSegments: Ny,
+  radiusSegments: Nx,
+  
+  // Lighting
+  dirLight: {
+      visible: true,
+      intensity: 5,
+      position: {
+          x: 0,
+          y: 20,
+          z: 10
+      }
+  },
+  
+  heatmap: {
+    enabled: false,
+    minColor: '#0000ff',  // Blue for minimum bending
+    maxColor: '#ff0000',  // Red for maximum bending
+    scale: 1.0
+},
+
+  // Actions
+  reset: function() {
+      resetClothSimulation(options.radiusSegments, options.heightSegments);
+  }
+};
+
 // Physics world setup
 const world = new CANNON.World({
     gravity: new CANNON.Vec3(0, -9.81, 0)
@@ -33,10 +87,6 @@ const groundBody = new CANNON.Body({
 world.addBody(groundBody);
 groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
 
-// Cylinder dimensions
-const outerRadius = 5;
-let innerRadius = 1.5;
-let cylinderHeight = 40;
 
 // Function to update inner cylinder
 function updateInnerCylinder(radius, height) {
@@ -71,8 +121,6 @@ const cylinderBody = new CANNON.Body({
 world.addBody(cylinderBody);
 
 // Cloth parameters
-let Nx = 30;
-let Ny = 30;
 const mass = 0.1;
 let dist = (2 * Math.PI * outerRadius) / Nx;
 
@@ -378,6 +426,7 @@ scene.add(innerCylinderMesh);
 // Create cloth geometry
 const clothGeo = new THREE.BufferGeometry();
 
+
 // Create vertices
 const positions = new Float32Array(Nx * (Ny + 1) * 3);
 const indices = [];
@@ -424,13 +473,192 @@ clothGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
 clothGeo.setIndex(indices);
 clothGeo.computeVertexNormals();
 
-const clothMat = new THREE.MeshStandardMaterial({
-    color: 0xFF6347, 
-    side: THREE.DoubleSide,
-    wireframe: false,
-    transparent: true,
-    opacity: 0.8
+const heatmapWidth = Nx;
+const heatmapHeight = Ny + 1;
+const heatmapSize = heatmapWidth * heatmapHeight;
+const heatmapData = new Float32Array(heatmapSize);
+const heatmapTexture = new THREE.DataTexture(
+    heatmapData,
+    heatmapWidth,
+    heatmapHeight,
+    THREE.RedFormat,
+    THREE.FloatType
+);
+heatmapTexture.needsUpdate = true;
+
+// Create 2D heatmap visualization
+const heatmapDisplaySize = 200;
+const heatmapQuadGeo = new THREE.PlaneGeometry(heatmapDisplaySize, heatmapDisplaySize);
+const heatmapQuadMat = new THREE.ShaderMaterial({
+    uniforms: {
+        heatmapTexture: { value: heatmapTexture },
+        minColor: { value: new THREE.Color(options.heatmap.minColor) },
+        maxColor: { value: new THREE.Color(options.heatmap.maxColor) }
+    },
+    vertexShader: `
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `,
+    fragmentShader: `
+        uniform sampler2D heatmapTexture;
+        uniform vec3 minColor;
+        uniform vec3 maxColor;
+        varying vec2 vUv;
+        void main() {
+            float value = texture2D(heatmapTexture, vUv).r;
+            vec3 color = mix(minColor, maxColor, value);
+            gl_FragColor = vec4(color, 1.0);
+        }
+    `
 });
+
+const heatmapQuad = new THREE.Mesh(heatmapQuadGeo, heatmapQuadMat);
+heatmapQuad.position.set(-window.innerWidth/2 + heatmapDisplaySize/2 + 20, 
+                        window.innerHeight/2 - heatmapDisplaySize/2 - 20, 
+                        -1);
+heatmapQuad.visible = false;
+
+// Add heatmap quad to orthographic scene
+const orthoScene = new THREE.Scene();
+const orthoCamera = new THREE.OrthographicCamera(
+    -window.innerWidth/2, window.innerWidth/2,
+    window.innerHeight/2, -window.innerHeight/2,
+    0.1, 10
+);
+orthoCamera.position.z = 1;
+orthoScene.add(heatmapQuad);
+
+
+const clothMatUniforms = {
+  minColor: { value: new THREE.Color(options.heatmap.minColor) },
+  maxColor: { value: new THREE.Color(options.heatmap.maxColor) },
+  bendingValues: { value: new Float32Array(Nx * (Ny + 1)) },
+  useHeatmap: { value: false }
+};
+
+const clothMat = new THREE.ShaderMaterial({
+  uniforms: {
+      minColor: { value: new THREE.Color(options.heatmap.minColor) },
+      maxColor: { value: new THREE.Color(options.heatmap.maxColor) },
+      useHeatmap: { value: false },
+      opacity: { value: options.clothOpacity },
+      scale: { value: options.heatmap.scale }
+  },
+  vertexShader: `
+      attribute float bending;
+      varying float vBending;
+      uniform float scale;
+      void main() {
+          vBending = bending * scale;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+  `,
+  fragmentShader: `
+      uniform vec3 minColor;
+      uniform vec3 maxColor;
+      uniform bool useHeatmap;
+      uniform float opacity;
+      varying float vBending;
+
+      vec3 hsv2rgb(vec3 c) {
+          vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+          vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+          return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+      }
+
+      void main() {
+          if (useHeatmap) {
+              // Create a smoother gradient using HSV color space
+              float value = clamp(vBending, 0.0, 1.0);
+              
+              // Create a rainbow gradient from blue (cold) to red (hot)
+              vec3 hsvColor = vec3(
+                  (1.0 - value) * 0.6,  // Hue: 0.6 (blue) to 0.0 (red)
+                  0.8,                   // Saturation
+                  mix(0.7, 1.0, value)   // Value/Brightness
+              );
+              
+              vec3 color = hsv2rgb(hsvColor);
+              gl_FragColor = vec4(color, opacity);
+          } else {
+              gl_FragColor = vec4(0.8, 0.2, 0.1, opacity);
+          }
+      }
+  `,
+  side: THREE.DoubleSide,
+  transparent: true
+});
+
+// Add bending attribute to geometry
+const bendingAttr = new Float32Array(Nx * (Ny + 1));
+clothGeo.setAttribute('bending', new THREE.BufferAttribute(bendingAttr, 1));
+
+// Function to calculate bending values
+function calculateBending() {
+  if (!options.heatmap.enabled) return;
+
+  const positions = clothGeo.attributes.position.array;
+  const bendingValues = new Float32Array(Nx * (Ny + 1));
+  
+  // Calculate local curvature for each vertex
+  for (let i = 0; i < Nx; i++) {
+      for (let j = 0; j < Ny + 1; j++) {
+          const idx = j * Nx + i;
+          const pos = new THREE.Vector3().fromArray(positions, idx * 3);
+          
+          // Get neighboring vertices with wrap-around for cylinder
+          const prevI = (i - 1 + Nx) % Nx;
+          const nextI = (i + 1) % Nx;
+          const prevJ = Math.max(0, j - 1);
+          const nextJ = Math.min(Ny, j + 1);
+          
+          const neighbors = [
+              new THREE.Vector3().fromArray(positions, (j * Nx + prevI) * 3),
+              new THREE.Vector3().fromArray(positions, (j * Nx + nextI) * 3),
+              new THREE.Vector3().fromArray(positions, (prevJ * Nx + i) * 3),
+              new THREE.Vector3().fromArray(positions, (nextJ * Nx + i) * 3)
+          ];
+
+          // Calculate curvature using second derivatives
+          let curvature = 0;
+          const normal = new THREE.Vector3();
+          
+          // Calculate approximate normal
+          for (let k = 0; k < neighbors.length; k++) {
+              const v1 = neighbors[k].clone().sub(pos);
+              const v2 = neighbors[(k + 1) % neighbors.length].clone().sub(pos);
+              normal.add(v1.cross(v2).normalize());
+          }
+          normal.normalize();
+
+          // Calculate curvature as deviation from original cylinder surface
+          const originalRadius = outerRadius;
+          const currentRadius = new THREE.Vector3(pos.x, 0, pos.z).length();
+          const radialDiff = Math.abs(currentRadius - originalRadius);
+          
+          // Calculate angle changes between adjacent segments
+          let angleChange = 0;
+          for (let k = 0; k < neighbors.length; k++) {
+              const v1 = neighbors[k].clone().sub(pos);
+              const v2 = neighbors[(k + 1) % neighbors.length].clone().sub(pos);
+              angleChange += v1.angleTo(v2);
+          }
+
+          // Combine radial difference and angle change for final curvature
+          curvature = (radialDiff / originalRadius + (angleChange / (2 * Math.PI) - 1)) * 2;
+          bendingValues[idx] = Math.min(1, Math.max(0, curvature));
+      }
+  }
+  
+  // Update geometry attribute and heatmap texture
+  clothGeo.attributes.bending.array = bendingValues;
+  clothGeo.attributes.bending.needsUpdate = true;
+  heatmapTexture.image.data.set(bendingValues);
+  heatmapTexture.needsUpdate = true;
+}
 
 const clothMesh = new THREE.Mesh(clothGeo, clothMat);
 scene.add(clothMesh);
@@ -470,47 +698,6 @@ const controls = new OrbitControls(camera, renderer.domElement);
 
 // GUI
 const gui = new dat.GUI();
-const options = {
-    // Appearance
-    clothColor: '#ff6347',
-    innerColor: '#444444',
-    wireframe: true,
-    clothOpacity: 0.8,
-    innerOpacity: 1.0,
-    
-    // Physics
-    gravity: -9.81,
-    damping: 0.5,
-    stiffness: 1e6,
-    relaxation: 3,
-    friction: 0.5,
-    restitution: 0.0,
-    preset: 'normal',
-    
-    // Geometry
-    tubeHeight: cylinderHeight,
-    innerRadius: innerRadius,
-    innerHeight: cylinderHeight,
-    heightSegments: Ny,
-    radiusSegments: Nx,
-    
-    // Lighting
-    dirLight: {
-        visible: true,
-        intensity: 5,
-        position: {
-            x: 0,
-            y: 20,
-            z: 10
-        }
-    },
-    
-    // Actions
-    reset: function() {
-        resetClothSimulation(options.radiusSegments, options.heightSegments);
-    }
-};
-
 
 // Appearance folder
 const appearanceFolder = gui.addFolder('Appearance');
@@ -524,7 +711,7 @@ appearanceFolder.add(options, 'wireframe').onChange(function(e) {
     wireframe.visible = e;
 });
 appearanceFolder.add(options, 'clothOpacity', 0, 1).onChange(function(e) {
-    clothMesh.material.opacity = e;
+  clothMat.uniforms.opacity.value = e;
 });
 appearanceFolder.add(options, 'innerOpacity', 0, 1).onChange(function(e) {
   innerCylinderMesh.material.opacity = e;
@@ -636,8 +823,40 @@ lightingFolder.add({ showLightSphere: true }, 'showLightSphere')
     });
 lightingFolder.open();
 
+const heatmapFolder = gui.addFolder('Heat Map');
+heatmapFolder.add(options.heatmap, 'enabled')
+    .name('Show Heat Map')
+    .onChange(function(value) {
+        clothMat.uniforms.useHeatmap.value = value;
+        heatmapQuad.visible = value;
+    });
+
+heatmapFolder.addColor(options.heatmap, 'minColor')
+    .name('Min Bend Color')
+    .onChange(function(value) {
+        clothMat.uniforms.minColor.value.set(value);
+        heatmapQuadMat.uniforms.minColor.value.set(value);
+    });
+
+heatmapFolder.addColor(options.heatmap, 'maxColor')
+    .name('Max Bend Color')
+    .onChange(function(value) {
+        clothMat.uniforms.maxColor.value.set(value);
+        heatmapQuadMat.uniforms.maxColor.value.set(value);
+    });
+
+    heatmapFolder.add(options.heatmap, 'scale', 0.1, )
+    .name('Sensitivity')
+    .onChange(function(value) {
+        clothMat.uniforms.scale.value = value;
+    });
+
+heatmapFolder.open();
+
 // Actions
 gui.add(options, 'reset').name('Reset Simulation');
+
+gui.remember(options);
 
 // Animation loop
 function animate() {
@@ -660,6 +879,13 @@ function animate() {
   lightSphere.visible = dirLight.visible;
   
   renderer.render(scene, camera);
+
+  if (options.heatmap.enabled) {
+    calculateBending();
+    renderer.autoClear = false;
+    renderer.render(orthoScene, orthoCamera);
+    renderer.autoClear = true;
+}
   controls.update();
 }
 
