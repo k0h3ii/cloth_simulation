@@ -202,58 +202,49 @@ function resetClothSimulation(newNx, newNy) {
 
 // Create constraints between particles
 function createConstraints() {
-    for (let i = 0; i < Nx; i++) {
-        for (let j = 0; j < Ny + 1; j++) {
-            // Horizontal constraints (including wrap-around)
-            const nextI = (i + 1) % Nx;
-            const constraint = new CANNON.DistanceConstraint(
-                particles[i][j],
-                particles[nextI][j],
-                dist
-            );
-            constraint.collideConnected = true;
-            constraints.push(constraint);
-            world.addConstraint(constraint);
+  const constraintOptions = {
+      collideConnected: true
+  };
+  
+  for (let i = 0; i < Nx; i++) {
+      for (let j = 0; j < Ny + 1; j++) {
+          // Horizontal constraints (including wrap-around)
+          const nextI = (i + 1) % Nx;
+          const constraint = new CANNON.DistanceConstraint(
+              particles[i][j],
+              particles[nextI][j],
+              dist,
+              constraintOptions
+          );
+          constraints.push(constraint);
+          world.addConstraint(constraint);
 
-            // Vertical constraints
-            if (j < Ny) {
-                const constraint = new CANNON.DistanceConstraint(
-                    particles[i][j],
-                    particles[i][j + 1],
-                    dist
-                );
-                constraint.collideConnected = true;
-                constraints.push(constraint);
-                world.addConstraint(constraint);
-            }
-            
-            // Diagonal constraints
-            if (j < Ny) {
-                const diagonalDist = dist * Math.sqrt(2);
-                
-                // Forward diagonal
-                const shearConstraint1 = new CANNON.DistanceConstraint(
-                    particles[i][j],
-                    particles[nextI][j + 1],
-                    diagonalDist
-                );
-                shearConstraint1.collideConnected = true;
-                constraints.push(shearConstraint1);
-                world.addConstraint(shearConstraint1);
-                
-                // Backward diagonal
-                const prevI = (i - 1 + Nx) % Nx;
-                const shearConstraint2 = new CANNON.DistanceConstraint(
-                    particles[i][j],
-                    particles[prevI][j + 1],
-                    diagonalDist
-                );
-                shearConstraint2.collideConnected = true;
-                constraints.push(shearConstraint2);
-                world.addConstraint(shearConstraint2);
-            }
-        }
-    }
+          // Vertical constraints
+          if (j < Ny) {
+              const verticalConstraint = new CANNON.DistanceConstraint(
+                  particles[i][j],
+                  particles[i][j + 1],
+                  dist,
+                  constraintOptions
+              );
+              constraints.push(verticalConstraint);
+              world.addConstraint(verticalConstraint);
+          }
+          
+          // Diagonal constraints 
+          if (j < Ny) {  
+              const diagonalDist = dist * Math.sqrt(2);
+              const shearConstraint = new CANNON.DistanceConstraint(
+                  particles[i][j],
+                  particles[nextI][j + 1],
+                  diagonalDist,
+                  constraintOptions
+              );
+              constraints.push(shearConstraint);
+              world.addConstraint(shearConstraint);
+          }
+      }
+  }
 }
 
 // Scene setup
@@ -377,7 +368,8 @@ scene.add(groundMesh);
 const innerCylinderGeo = new THREE.CylinderGeometry(innerRadius, innerRadius, cylinderHeight, 32);
 const innerCylinderMat = new THREE.MeshStandardMaterial({
     color: 0x444444,
-    side: THREE.DoubleSide
+    side: THREE.DoubleSide,
+    transparent: true
 });
 const innerCylinderMesh = new THREE.Mesh(innerCylinderGeo, innerCylinderMat);
 innerCylinderMesh.position.y = cylinderHeight/2;
@@ -479,22 +471,30 @@ const controls = new OrbitControls(camera, renderer.domElement);
 // GUI
 const gui = new dat.GUI();
 const options = {
+    // Appearance
     clothColor: '#ff6347',
     innerColor: '#444444',
     wireframe: true,
+    clothOpacity: 0.8,
+    innerOpacity: 1.0,
+    
+    // Physics
     gravity: -9.81,
     damping: 0.5,
-    stiffness: 1000,
+    stiffness: 1e6,
     relaxation: 3,
-    clothOpacity: 0.8,
     friction: 0.5,
     restitution: 0.0,
     preset: 'normal',
+    
+    // Geometry
     tubeHeight: cylinderHeight,
     innerRadius: innerRadius,
     innerHeight: cylinderHeight,
     heightSegments: Ny,
     radiusSegments: Nx,
+    
+    // Lighting
     dirLight: {
         visible: true,
         intensity: 5,
@@ -504,142 +504,140 @@ const options = {
             z: 10
         }
     },
+    
+    // Actions
     reset: function() {
         resetClothSimulation(options.radiusSegments, options.heightSegments);
     }
 };
 
-gui.addColor(options, 'clothColor').onChange(function(e) {
+
+// Appearance folder
+const appearanceFolder = gui.addFolder('Appearance');
+appearanceFolder.addColor(options, 'clothColor').onChange(function(e) {
     clothMesh.material.color.set(e);
 });
-
-gui.addColor(options, 'innerColor').onChange(function(e) {
+appearanceFolder.addColor(options, 'innerColor').onChange(function(e) {
     innerCylinderMesh.material.color.set(e);
 });
-
-gui.add(options, 'wireframe').onChange(function(e) {
+appearanceFolder.add(options, 'wireframe').onChange(function(e) {
     wireframe.visible = e;
 });
+appearanceFolder.add(options, 'clothOpacity', 0, 1).onChange(function(e) {
+    clothMesh.material.opacity = e;
+});
+appearanceFolder.add(options, 'innerOpacity', 0, 1).onChange(function(e) {
+  innerCylinderMesh.material.opacity = e;
+});
+appearanceFolder.open();
 
-gui.add(options, 'gravity', -20, 0).onChange(function(e) {
+// Physics folder
+const physicsFolder = gui.addFolder('Physics');
+physicsFolder.add(options, 'gravity', -20, 0).onChange(function(e) {
     world.gravity.y = e;
 });
-
-gui.add(options, 'damping', 0, 1).onChange(function(e) {
+physicsFolder.add(options, 'damping', 0, 1).onChange(function(e) {
     particles.forEach(row => {
         row.forEach(particle => {
             particle.linearDamping = e;
         });
     });
 });
-
-gui.add(options, 'stiffness', 0, 50000).onChange(function(e) {
-    constraints.forEach(constraint => {
-        constraint.stiffness = e;
-    });
+physicsFolder.add(options, 'stiffness', 1e4, 1e7).onChange(function(e) {
+    contactMaterial.contactEquationStiffness = e;
+    world.defaultContactMaterial.contactEquationStiffness = e;
 });
-
-gui.add(options, 'relaxation', 0, 10).onChange(function(e) {
-    constraints.forEach(constraint => {
-        constraint.relaxation = e;
-    });
+physicsFolder.add(options, 'relaxation', 1, 10).onChange(function(e) {
+    contactMaterial.contactEquationRelaxation = e;
+    world.defaultContactMaterial.contactEquationRelaxation = e;
 });
-
-gui.add(options, 'clothOpacity', 0, 1).onChange(function(e) {
-    clothMesh.material.opacity = e;
-});
-
-gui.add(options, 'friction', 0, 1).onChange(function(e) {
+physicsFolder.add(options, 'friction', 0, 1).onChange(function(e) {
     contactMaterial.friction = e;
 });
-
-gui.add(options, 'restitution', 0, 1).onChange(function(e) {
+physicsFolder.add(options, 'restitution', 0, 1).onChange(function(e) {
     contactMaterial.restitution = e;
 });
-
-gui.add(options, 'preset', ['soft', 'normal', 'rigid']).onChange(function(e) {
+physicsFolder.add(options, 'preset', ['soft', 'normal', 'rigid']).onChange(function(e) {
     switch(e) {
         case 'soft':
-            options.stiffness = 100;
-            options.relaxation = 2;
+            options.stiffness = 1e4;
+            options.relaxation = 3;
             break;
         case 'normal':
-            options.stiffness = 1000;
-            options.relaxation = 4;
+            options.stiffness = 1e6;
+            options.relaxation = 3;
             break;
         case 'rigid':
-            options.stiffness = 3000;
-            options.relaxation = 8;
+            options.stiffness = 1e7;
+            options.relaxation = 2;
             break;
     }
     
-    constraints.forEach(constraint => {
-        constraint.stiffness = options.stiffness;
-        constraint.relaxation = options.relaxation;
-    });
+    contactMaterial.contactEquationStiffness = options.stiffness;
+    world.defaultContactMaterial.contactEquationStiffness = options.stiffness;
+    contactMaterial.contactEquationRelaxation = options.relaxation;
+    world.defaultContactMaterial.contactEquationRelaxation = options.relaxation;
     
+    // Update GUI display
     for (let controller of gui.__controllers) {
         controller.updateDisplay();
     }
 });
+physicsFolder.open();
 
-gui.add(options, 'tubeHeight', 10, cylinderHeight * 1.2).onChange(function(e) {
-  updateTopBoundaryHeight(e);
+// Geometry folder
+const geometryFolder = gui.addFolder('Geometry');
+geometryFolder.add(options, 'tubeHeight', 10, cylinderHeight * 1.2).onChange(function(e) {
+    updateTopBoundaryHeight(e);
 });
-
-gui.add(options, 'innerRadius', 0.5, outerRadius - 1).onChange(function(e) {
-  innerRadius = e;
-  updateInnerCylinder(innerRadius, options.innerHeight);
+geometryFolder.add(options, 'innerRadius', 0.5, outerRadius - 1).onChange(function(e) {
+    innerRadius = e;
+    updateInnerCylinder(innerRadius, options.innerHeight);
 });
-
-gui.add(options, 'innerHeight', 10, cylinderHeight * 1.5).onChange(function(e) {
-  cylinderHeight = e;
-  updateInnerCylinder(options.innerRadius, cylinderHeight);
+geometryFolder.add(options, 'innerHeight', 10, cylinderHeight * 1.5).onChange(function(e) {
+    cylinderHeight = e;
+    updateInnerCylinder(options.innerRadius, cylinderHeight);
 });
-
-gui.add(options, 'radiusSegments', 10, 50).step(1).onChange(function(e) {
-  resetClothSimulation(Math.floor(e), options.heightSegments);
+geometryFolder.add(options, 'radiusSegments', 10, 50).step(1).onChange(function(e) {
+    resetClothSimulation(Math.floor(e), options.heightSegments);
 });
-
-gui.add(options, 'heightSegments', 10, 50).step(1).onChange(function(e) {
-  resetClothSimulation(options.radiusSegments, Math.floor(e));
+geometryFolder.add(options, 'heightSegments', 10, 50).step(1).onChange(function(e) {
+    resetClothSimulation(options.radiusSegments, Math.floor(e));
 });
+geometryFolder.open();
 
-gui.add(options, 'reset').name('Reset Simulation');
-
-const dirLightFolder = gui.addFolder('Directional Light');
-
-dirLightFolder.add(options.dirLight, 'visible').onChange(function(e) {
+// Lighting folder
+const lightingFolder = gui.addFolder('Lighting');
+lightingFolder.add(options.dirLight, 'visible').onChange(function(e) {
     dirLight.visible = e;
     dirLightHelper.visible = e;
 });
-
-dirLightFolder.add(options.dirLight, 'intensity', 0, 10).onChange(function(e) {
+lightingFolder.add(options.dirLight, 'intensity', 0, 10).onChange(function(e) {
     dirLight.intensity = e;
 });
 
-dirLightFolder.add(options.dirLight.position, 'x', -50, 50).onChange(function(e) {
+const lightPositionFolder = lightingFolder.addFolder('Light Position');
+lightPositionFolder.add(options.dirLight.position, 'x', -50, 50).onChange(function(e) {
     dirLight.position.x = e;
     dirLightHelper.update();
 });
-
-dirLightFolder.add(options.dirLight.position, 'y', -50, 50).onChange(function(e) {
+lightPositionFolder.add(options.dirLight.position, 'y', -50, 50).onChange(function(e) {
     dirLight.position.y = e;
     dirLightHelper.update();
 });
-
-dirLightFolder.add(options.dirLight.position, 'z', -50, 50).onChange(function(e) {
+lightPositionFolder.add(options.dirLight.position, 'z', -50, 50).onChange(function(e) {
     dirLight.position.z = e;
     dirLightHelper.update();
 });
-
-dirLightFolder.add({ showLightSphere: true }, 'showLightSphere')
+lightingFolder.add({ showLightSphere: true }, 'showLightSphere')
     .name('Show Light Control')
     .onChange(function(value) {
         lightSphere.visible = value && dirLight.visible;
     });
+lightingFolder.open();
 
-dirLightFolder.open();
+// Actions
+gui.add(options, 'reset').name('Reset Simulation');
 
 // Animation loop
 function animate() {
