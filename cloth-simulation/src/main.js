@@ -486,29 +486,40 @@ heatmapTexture.needsUpdate = true;
 const heatmapDisplaySize = 200;
 const heatmapQuadGeo = new THREE.PlaneGeometry(heatmapDisplaySize, heatmapDisplaySize);
 const heatmapQuadMat = new THREE.ShaderMaterial({
-    uniforms: {
-        heatmapTexture: { value: heatmapTexture },
-        minColor: { value: new THREE.Color(options.heatmap.minColor) },
-        maxColor: { value: new THREE.Color(options.heatmap.maxColor) }
-    },
-    vertexShader: `
-        varying vec2 vUv;
-        void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-    `,
-    fragmentShader: `
-        uniform sampler2D heatmapTexture;
-        uniform vec3 minColor;
-        uniform vec3 maxColor;
-        varying vec2 vUv;
-        void main() {
-            float value = texture2D(heatmapTexture, vUv).r;
-            vec3 color = mix(minColor, maxColor, value);
-            gl_FragColor = vec4(color, 1.0);
-        }
-    `
+  uniforms: {
+      heatmapTexture: { value: heatmapTexture },
+      opacity: { value: options.clothOpacity }
+  },
+  vertexShader: `
+      varying vec2 vUv;
+      void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+  `,
+  fragmentShader: `
+      uniform sampler2D heatmapTexture;
+      uniform float opacity;
+      varying vec2 vUv;
+
+      vec3 hsv2rgb(vec3 c) {
+          vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+          vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+          return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+      }
+
+      void main() {
+          float value = texture2D(heatmapTexture, vUv).r;
+          vec3 hsvColor = vec3(
+              (1.0 - value) * 0.6, // Hue goes from 0.6 (blue) to 0 (red)
+              0.8,                  // Constant saturation
+              mix(0.7, 1.0, value) // Value/brightness
+          );
+          vec3 color = hsv2rgb(hsvColor);
+          gl_FragColor = vec4(color, opacity);
+      }
+  `,
+  transparent: true
 });
 
 const heatmapQuad = new THREE.Mesh(heatmapQuadGeo, heatmapQuadMat);
@@ -785,20 +796,6 @@ heatmapFolder.add(options.heatmap, 'enabled')
             clothMesh.material = standardClothMat;
             heatmapQuad.visible = false;
         }
-    });
-
-heatmapFolder.addColor(options.heatmap, 'minColor')
-    .name('Min Bend Color')
-    .onChange(function(value) {
-        heatmapClothMat.uniforms.minColor.value.set(value);
-        heatmapQuadMat.uniforms.minColor.value.set(value);
-    });
-
-heatmapFolder.addColor(options.heatmap, 'maxColor')
-    .name('Max Bend Color')
-    .onChange(function(value) {
-        heatmapClothMat.uniforms.maxColor.value.set(value);
-        heatmapQuadMat.uniforms.maxColor.value.set(value);
     });
 
 heatmapFolder.add(options.heatmap, 'scale', 0.1, 5)
