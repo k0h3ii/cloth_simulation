@@ -181,6 +181,13 @@ function removeExistingCloth() {
       world.removeConstraint(constraint);
   });
   
+// Clean up heatmap
+if (heatmapQuad) {
+  orthoScene.remove(heatmapQuad);
+  heatmapQuad.geometry.dispose();
+  heatmapQuad.material.dispose();
+}
+
   // Clear heatmap data
   if (heatmapTexture) {
       heatmapTexture.dispose();
@@ -251,6 +258,35 @@ function resetClothSimulation(newNx, newNy) {
   // Create new cloth physics
   createCylindricalGrid();
   createConstraints();
+
+  if (options.heatmap.enabled) {
+    // Remove old heatmap elements if they exist
+    if (heatmapQuad) {
+        orthoScene.remove(heatmapQuad);
+    }
+    
+    // Create new heatmap setup
+    const heatmapSetup = setupHeatmap(Nx, Ny);
+    heatmapTexture = heatmapSetup.texture;
+    heatmapQuad = heatmapSetup.quad;
+    
+    // Add new heatmap quad to scene
+    orthoScene.add(heatmapQuad);
+    heatmapQuad.visible = true;
+    
+    // Switch to heatmap material
+    heatmapClothMat = createHeatmapMaterial(options);
+    clothMesh.material = heatmapClothMat;
+    
+    // Initialize bending values
+    const bendingAttr = new Float32Array(Nx * (Ny + 1));
+    clothGeo.setAttribute('bending', new THREE.BufferAttribute(bendingAttr, 1));
+    
+    // Calculate initial bending values
+    calculateBending(clothGeo, outerRadius, Nx, Ny);
+} else {
+    clothMesh.material = standardClothMat;
+}
 }
 
 
@@ -606,11 +642,17 @@ function createHeatmapMaterial(options) {
   });
 }
 
-// Create 2D heatmap visualization
-const heatmapSetup = setupHeatmap(Nx, Ny);
-const heatmapTexture = heatmapSetup.texture;
-const heatmapQuad = heatmapSetup.quad;
-orthoScene.add(heatmapQuad);
+// // Create 2D heatmap visualization
+// const heatmapSetup = setupHeatmap(Nx, Ny);
+// const heatmapTexture = heatmapSetup.texture;
+// const heatmapQuad = heatmapSetup.quad;
+// orthoScene.add(heatmapQuad);
+
+// const heatmapClothMat = createHeatmapMaterial(options);
+
+let heatmapTexture;
+let heatmapQuad;
+let heatmapClothMat;
 
 const standardClothMat = new THREE.MeshStandardMaterial({
   color: options.clothColor,
@@ -620,7 +662,7 @@ const standardClothMat = new THREE.MeshStandardMaterial({
   wireframe: false
 });
 
-const heatmapClothMat = createHeatmapMaterial(options);
+
 
 // Add bending attribute to geometry
 const bendingAttr = new Float32Array(Nx * (Ny + 1));
@@ -829,11 +871,34 @@ heatmapFolder.add(options.heatmap, 'enabled')
     .name('Show Heat Map')
     .onChange(function(value) {
         if (value) {
-            clothMesh.material = heatmapClothMat;
+            // Initialize heatmap elements when enabled
+            const heatmapSetup = setupHeatmap(Nx, Ny);
+            heatmapTexture = heatmapSetup.texture;
+            heatmapQuad = heatmapSetup.quad;
+            heatmapClothMat = createHeatmapMaterial(options);
+            
+            orthoScene.add(heatmapQuad);
             heatmapQuad.visible = true;
+            clothMesh.material = heatmapClothMat;
+            
+            // Initialize bending values
+            const bendingAttr = new Float32Array(Nx * (Ny + 1));
+            clothGeo.setAttribute('bending', new THREE.BufferAttribute(bendingAttr, 1));
+            calculateBending(clothGeo, outerRadius, Nx, Ny);
         } else {
+            // Clean up heatmap elements when disabled
+            if (heatmapQuad) {
+                orthoScene.remove(heatmapQuad);
+                heatmapQuad.geometry.dispose();
+                heatmapQuad.material.dispose();
+            }
+            if (heatmapTexture) {
+                heatmapTexture.dispose();
+            }
+            if (clothGeo.attributes.bending) {
+                clothGeo.deleteAttribute('bending');
+            }
             clothMesh.material = standardClothMat;
-            heatmapQuad.visible = false;
         }
     });
 
