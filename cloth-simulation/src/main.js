@@ -287,6 +287,7 @@ function resetClothSimulation(newNx, newNy) {
 } else {
     clothMesh.material = standardClothMat;
 }
+gui.updateDisplay();
 }
 
 
@@ -835,11 +836,27 @@ geometryFolder.add(options, 'innerHeight', 10, cylinderHeight * 1.5).onChange(fu
     cylinderHeight = e;
     updateInnerCylinder(options.innerRadius, cylinderHeight);
 });
-geometryFolder.add(options, 'radiusSegments', 10, 50).step(1).onChange(function(e) {
-    resetClothSimulation(Math.floor(e), options.heightSegments);
+const radiusController = geometryFolder.add(options, 'radiusSegments', 10, 50).step(1);
+radiusController.domElement.addEventListener('mousedown', function() {
+    radiusController.updateDisplay();
 });
-geometryFolder.add(options, 'heightSegments', 10, 50).step(1).onChange(function(e) {
-    resetClothSimulation(options.radiusSegments, Math.floor(e));
+radiusController.onChange(function(value) {
+    const intValue = Math.floor(value);
+    resetClothSimulation(intValue, options.heightSegments);
+    // Force slider position to match value
+    requestAnimationFrame(() => radiusController.updateDisplay());
+});
+
+// Add manual value syncing for the height segments slider
+const heightController = geometryFolder.add(options, 'heightSegments', 10, 50).step(1);
+heightController.domElement.addEventListener('mousedown', function() {
+    heightController.updateDisplay();
+});
+heightController.onChange(function(value) {
+    const intValue = Math.floor(value);
+    resetClothSimulation(options.radiusSegments, intValue);
+    // Force slider position to match value
+    requestAnimationFrame(() => heightController.updateDisplay());
 });
 
 // Lighting folder
@@ -871,34 +888,33 @@ heatmapFolder.add(options.heatmap, 'enabled')
     .name('Show Heat Map')
     .onChange(function(value) {
         if (value) {
-            // Initialize heatmap elements when enabled
-            const heatmapSetup = setupHeatmap(Nx, Ny);
-            heatmapTexture = heatmapSetup.texture;
-            heatmapQuad = heatmapSetup.quad;
-            heatmapClothMat = createHeatmapMaterial(options);
-            
-            orthoScene.add(heatmapQuad);
-            heatmapQuad.visible = true;
+            // Switch to heatmap material
+            if (!heatmapClothMat) {
+                heatmapClothMat = createHeatmapMaterial(options);
+            }
             clothMesh.material = heatmapClothMat;
             
-            // Initialize bending values
-            const bendingAttr = new Float32Array(Nx * (Ny + 1));
-            clothGeo.setAttribute('bending', new THREE.BufferAttribute(bendingAttr, 1));
-            calculateBending(clothGeo, outerRadius, Nx, Ny);
-        } else {
-            // Clean up heatmap elements when disabled
+            // Setup heatmap
+                const heatmapSetup = setupHeatmap(Nx, Ny);
+                heatmapTexture = heatmapSetup.texture;
+                heatmapQuad = heatmapSetup.quad;
+                orthoScene.add(heatmapQuad);
+
             if (heatmapQuad) {
-                orthoScene.remove(heatmapQuad);
-                heatmapQuad.geometry.dispose();
-                heatmapQuad.material.dispose();
+                heatmapQuad.visible = true;
             }
-            if (heatmapTexture) {
-                heatmapTexture.dispose();
+            
+            // Ensure bending attribute exists
+            if (!clothGeo.attributes.bending) {
+                const bendingAttr = new Float32Array(Nx * (Ny + 1));
+                clothGeo.setAttribute('bending', new THREE.BufferAttribute(bendingAttr, 1));
             }
-            if (clothGeo.attributes.bending) {
-                clothGeo.deleteAttribute('bending');
-            }
+        } else {
+            // Switch back to standard material
             clothMesh.material = standardClothMat;
+            if (heatmapQuad) {
+                heatmapQuad.visible = false;
+            }
         }
     });
 
