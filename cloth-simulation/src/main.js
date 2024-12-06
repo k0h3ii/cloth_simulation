@@ -479,66 +479,6 @@ clothGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
 clothGeo.setIndex(indices);
 clothGeo.computeVertexNormals();
 
-const heatmapWidth = Nx;
-const heatmapHeight = Ny + 1;
-const heatmapSize = heatmapWidth * heatmapHeight;
-const heatmapData = new Float32Array(heatmapSize);
-const heatmapTexture = new THREE.DataTexture(
-    heatmapData,
-    heatmapWidth,
-    heatmapHeight,
-    THREE.RedFormat,
-    THREE.FloatType
-);
-heatmapTexture.needsUpdate = true;
-
-// Create 2D heatmap visualization
-const heatmapDisplaySize = 300;
-const heatmapQuadGeo = new THREE.PlaneGeometry(heatmapDisplaySize, heatmapDisplaySize);
-const heatmapQuadMat = new THREE.ShaderMaterial({
-  uniforms: {
-      heatmapTexture: { value: heatmapTexture },
-      opacity: { value: options.clothOpacity }
-  },
-  vertexShader: `
-      varying vec2 vUv;
-      void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-  `,
-  fragmentShader: `
-      uniform sampler2D heatmapTexture;
-      uniform float opacity;
-      varying vec2 vUv;
-
-      vec3 hsv2rgb(vec3 c) {
-          vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-          vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-          return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-      }
-
-      void main() {
-          float value = texture2D(heatmapTexture, vUv).r;
-          vec3 hsvColor = vec3(
-              (1.0 - value) * 0.6, // Hue goes from 0.6 (blue) to 0 (red)
-              0.8,                  // Constant saturation
-              mix(0.7, 1.0, value) // Value/brightness
-          );
-          vec3 color = hsv2rgb(hsvColor);
-          gl_FragColor = vec4(color, opacity);
-      }
-  `,
-  transparent: true
-});
-
-const heatmapQuad = new THREE.Mesh(heatmapQuadGeo, heatmapQuadMat);
-heatmapQuad.position.set(-window.innerWidth/2 + heatmapDisplaySize/2 + 20, 
-                        window.innerHeight/2 - heatmapDisplaySize/2 - 20, 
-                        -1);
-heatmapQuad.visible = false;
-
-// Add heatmap quad to orthographic scene
 const orthoScene = new THREE.Scene();
 const orthoCamera = new THREE.OrthographicCamera(
     -window.innerWidth/2, window.innerWidth/2,
@@ -546,6 +486,130 @@ const orthoCamera = new THREE.OrthographicCamera(
     0.1, 10
 );
 orthoCamera.position.z = 1;
+
+
+
+function setupHeatmap(Nx, Ny) {
+  const heatmapWidth = Nx;
+  const heatmapHeight = Ny + 1;
+  const heatmapSize = heatmapWidth * heatmapHeight;
+  const heatmapData = new Float32Array(heatmapSize);
+  
+  // Create heatmap texture
+  const heatmapTexture = new THREE.DataTexture(
+      heatmapData,
+      heatmapWidth,
+      heatmapHeight,
+      THREE.RedFormat,
+      THREE.FloatType
+  );
+  heatmapTexture.needsUpdate = true;
+
+  // Create 2D heatmap visualization
+  const heatmapDisplaySize = 300;
+  const heatmapQuadGeo = new THREE.PlaneGeometry(heatmapDisplaySize, heatmapDisplaySize);
+  const heatmapQuadMat = new THREE.ShaderMaterial({
+      uniforms: {
+          heatmapTexture: { value: heatmapTexture },
+          opacity: { value: options.clothOpacity }
+      },
+      vertexShader: `
+          varying vec2 vUv;
+          void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+      `,
+      fragmentShader: `
+          uniform sampler2D heatmapTexture;
+          uniform float opacity;
+          varying vec2 vUv;
+
+          vec3 hsv2rgb(vec3 c) {
+              vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+              vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+              return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+          }
+
+          void main() {
+              float value = texture2D(heatmapTexture, vUv).r;
+              vec3 hsvColor = vec3(
+                  (1.0 - value) * 0.6,
+                  0.8,
+                  mix(0.7, 1.0, value)
+              );
+              vec3 color = hsv2rgb(hsvColor);
+              gl_FragColor = vec4(color, opacity);
+          }
+      `,
+      transparent: true
+  });
+
+  const heatmapQuad = new THREE.Mesh(heatmapQuadGeo, heatmapQuadMat);
+  heatmapQuad.position.set(
+      -window.innerWidth/2 + heatmapDisplaySize/2 + 20, 
+      window.innerHeight/2 - heatmapDisplaySize/2 - 20, 
+      -1
+  );
+  heatmapQuad.visible = false;
+
+  return {
+      texture: heatmapTexture,
+      quad: heatmapQuad
+  };
+}
+
+// Create heatmap material
+function createHeatmapMaterial(options) {
+  return new THREE.ShaderMaterial({
+      uniforms: {
+          minColor: { value: new THREE.Color(options.heatmap.minColor) },
+          maxColor: { value: new THREE.Color(options.heatmap.maxColor) },
+          useHeatmap: { value: true },
+          opacity: { value: options.clothOpacity },
+          scale: { value: options.heatmap.scale }
+      },
+      vertexShader: `
+          attribute float bending;
+          varying float vBending;
+          uniform float scale;
+          void main() {
+              vBending = bending * scale;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+      `,
+      fragmentShader: `
+          uniform vec3 minColor;
+          uniform vec3 maxColor;
+          uniform float opacity;
+          varying float vBending;
+
+          vec3 hsv2rgb(vec3 c) {
+              vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+              vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+              return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+          }
+
+          void main() {
+              float value = clamp(vBending, 0.0, 1.0);
+              vec3 hsvColor = vec3(
+                  (1.0 - value) * 0.6,
+                  0.8,
+                  mix(0.7, 1.0, value)
+              );
+              vec3 color = hsv2rgb(hsvColor);
+              gl_FragColor = vec4(color, opacity);
+          }
+      `,
+      side: THREE.DoubleSide,
+      transparent: true
+  });
+}
+
+// Create 2D heatmap visualization
+const heatmapSetup = setupHeatmap(Nx, Ny);
+const heatmapTexture = heatmapSetup.texture;
+const heatmapQuad = heatmapSetup.quad;
 orthoScene.add(heatmapQuad);
 
 const standardClothMat = new THREE.MeshStandardMaterial({
@@ -556,56 +620,14 @@ const standardClothMat = new THREE.MeshStandardMaterial({
   wireframe: false
 });
 
-const heatmapClothMat = new THREE.ShaderMaterial({
-  uniforms: {
-      minColor: { value: new THREE.Color(options.heatmap.minColor) },
-      maxColor: { value: new THREE.Color(options.heatmap.maxColor) },
-      useHeatmap: { value: true }, // Always true for this material
-      opacity: { value: options.clothOpacity },
-      scale: { value: options.heatmap.scale }
-  },
-  vertexShader: `
-      attribute float bending;
-      varying float vBending;
-      uniform float scale;
-      void main() {
-          vBending = bending * scale;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-  `,
-  fragmentShader: `
-      uniform vec3 minColor;
-      uniform vec3 maxColor;
-      uniform float opacity;
-      varying float vBending;
-
-      vec3 hsv2rgb(vec3 c) {
-          vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-          vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-          return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-      }
-
-      void main() {
-          float value = clamp(vBending, 0.0, 1.0);
-          vec3 hsvColor = vec3(
-              (1.0 - value) * 0.6,
-              0.8,
-              mix(0.7, 1.0, value)
-          );
-          vec3 color = hsv2rgb(hsvColor);
-          gl_FragColor = vec4(color, opacity);
-      }
-  `,
-  side: THREE.DoubleSide,
-  transparent: true
-});
+const heatmapClothMat = createHeatmapMaterial(options);
 
 // Add bending attribute to geometry
 const bendingAttr = new Float32Array(Nx * (Ny + 1));
 clothGeo.setAttribute('bending', new THREE.BufferAttribute(bendingAttr, 1));
 
 // Function to calculate bending values
-function calculateBending() {
+function calculateBending(clothGeo, outerRadius, Nx, Ny, heatmapTexture) {
   if (!options.heatmap.enabled) return;
 
   const positions = clothGeo.attributes.position.array;
@@ -630,33 +652,8 @@ function calculateBending() {
               new THREE.Vector3().fromArray(positions, (nextJ * Nx + i) * 3)
           ];
 
-          // Calculate curvature using second derivatives
-          let curvature = 0;
-          const normal = new THREE.Vector3();
-          
-          // Calculate approximate normal
-          for (let k = 0; k < neighbors.length; k++) {
-              const v1 = neighbors[k].clone().sub(pos);
-              const v2 = neighbors[(k + 1) % neighbors.length].clone().sub(pos);
-              normal.add(v1.cross(v2).normalize());
-          }
-          normal.normalize();
-
-          // Calculate curvature as deviation from original cylinder surface
-          const originalRadius = outerRadius;
-          const currentRadius = new THREE.Vector3(pos.x, 0, pos.z).length();
-          const radialDiff = Math.abs(currentRadius - originalRadius);
-          
-          // Calculate angle changes between adjacent segments
-          let angleChange = 0;
-          for (let k = 0; k < neighbors.length; k++) {
-              const v1 = neighbors[k].clone().sub(pos);
-              const v2 = neighbors[(k + 1) % neighbors.length].clone().sub(pos);
-              angleChange += v1.angleTo(v2);
-          }
-
-          // Combine radial difference and angle change for final curvature
-          curvature = (radialDiff / originalRadius + (angleChange / (2 * Math.PI) - 1)) * 2;
+          // Calculate curvature
+          let curvature = calculateVertexCurvature(pos, neighbors, outerRadius);
           bendingValues[idx] = Math.min(1, Math.max(0, curvature));
       }
   }
@@ -667,6 +664,35 @@ function calculateBending() {
   heatmapTexture.image.data.set(bendingValues);
   heatmapTexture.needsUpdate = true;
 }
+
+// Helper function to calculate curvature for a single vertex
+function calculateVertexCurvature(pos, neighbors, originalRadius) {
+  const normal = new THREE.Vector3();
+  
+  // Calculate approximate normal
+  for (let k = 0; k < neighbors.length; k++) {
+      const v1 = neighbors[k].clone().sub(pos);
+      const v2 = neighbors[(k + 1) % neighbors.length].clone().sub(pos);
+      normal.add(v1.cross(v2).normalize());
+  }
+  normal.normalize();
+
+  // Calculate radial difference
+  const currentRadius = new THREE.Vector3(pos.x, 0, pos.z).length();
+  const radialDiff = Math.abs(currentRadius - originalRadius);
+  
+  // Calculate angle changes
+  let angleChange = 0;
+  for (let k = 0; k < neighbors.length; k++) {
+      const v1 = neighbors[k].clone().sub(pos);
+      const v2 = neighbors[(k + 1) % neighbors.length].clone().sub(pos);
+      angleChange += v1.angleTo(v2);
+  }
+
+  // Combine radial difference and angle change
+  return (radialDiff / originalRadius + (angleChange / (2 * Math.PI) - 1)) * 2;
+}
+  
 
 const clothMesh = new THREE.Mesh(clothGeo, standardClothMat);
 scene.add(clothMesh);
@@ -844,7 +870,7 @@ function animate() {
   renderer.render(scene, camera);
 
   if (options.heatmap.enabled) {
-    calculateBending();
+    calculateBending(clothGeo, outerRadius, Nx, Ny, heatmapTexture);
     renderer.autoClear = false;
     renderer.render(orthoScene, orthoCamera);
     renderer.autoClear = true;
