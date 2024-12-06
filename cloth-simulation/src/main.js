@@ -19,6 +19,7 @@ const options = {
   innerOpacity: 1.0,
   
   // Physics
+  mass: 0.1,
   gravity: -9.81,
   damping: 0.5,
   relaxation: 3,
@@ -117,7 +118,6 @@ const cylinderBody = new CANNON.Body({
 world.addBody(cylinderBody);
 
 // Cloth parameters
-const mass = 0.1;
 let dist = (2 * Math.PI * outerRadius) / Nx;
 
 let constraints = [];
@@ -135,7 +135,7 @@ function createCylindricalGrid() {
           const height = (j / Ny) * cylinderHeight;
 
           const particle = new CANNON.Body({
-              mass: j === Ny ? 0 : mass, // Make top row particles static
+              mass: j === Ny ? 0 : options.mass, // Make top row particles static
               material: particleMaterial,
               shape: particleShape,
               position: new CANNON.Vec3(
@@ -483,7 +483,7 @@ const heatmapTexture = new THREE.DataTexture(
 heatmapTexture.needsUpdate = true;
 
 // Create 2D heatmap visualization
-const heatmapDisplaySize = 200;
+const heatmapDisplaySize = 300;
 const heatmapQuadGeo = new THREE.PlaneGeometry(heatmapDisplaySize, heatmapDisplaySize);
 const heatmapQuadMat = new THREE.ShaderMaterial({
   uniforms: {
@@ -722,6 +722,9 @@ appearanceFolder.add(options, 'innerOpacity', 0, 1).onChange(function(e) {
 
 // Physics folder
 const physicsFolder = gui.addFolder('Physics');
+physicsFolder.add(options, 'mass', 0.01, 1).onChange(function(e) {
+  resetClothSimulation(options.radiusSegments, options.heightSegments);
+});
 physicsFolder.add(options, 'gravity', -100, 0).onChange(function(e) {
     world.gravity.y = e;
 });
