@@ -5,10 +5,10 @@ import * as dat from 'dat.gui';
 import * as CANNON from 'cannon-es';
 
 const outerRadius = 5;
-let innerRadius = 1.5;
-let cylinderHeight = 40;
+let innerRadius = 2.5;
 let Nx = 30;
 let Ny = 30;
+let cylinderHeight = 40;
 
 const options = {
   // Appearance
@@ -19,7 +19,7 @@ const options = {
   innerOpacity: 1.0,
   
   // Physics
-  mass: 0.1,
+  mass: 0.3,
   gravity: -9.81,
   damping: 0.5,
   relaxation: 3,
@@ -168,6 +168,7 @@ function updateTopBoundaryHeight(height) {
       particle.velocity.set(0, 0, 0); // Reset velocity
   });
 }
+
 function removeExistingCloth() {
   // Remove particles from physics world
   particles.forEach(row => {
@@ -524,15 +525,13 @@ const orthoCamera = new THREE.OrthographicCamera(
 );
 orthoCamera.position.z = 1;
 
-
-
 function setupHeatmap(Nx, Ny) {
   const heatmapWidth = Nx;
   const heatmapHeight = Ny + 1;
   const heatmapSize = heatmapWidth * heatmapHeight;
   const heatmapData = new Float32Array(heatmapSize);
   
-  // Create heatmap texture
+  // Create heatmap texture with filtering
   const heatmapTexture = new THREE.DataTexture(
       heatmapData,
       heatmapWidth,
@@ -540,6 +539,9 @@ function setupHeatmap(Nx, Ny) {
       THREE.RedFormat,
       THREE.FloatType
   );
+  // Enable texture interpolation
+  heatmapTexture.minFilter = THREE.LinearFilter;
+  heatmapTexture.magFilter = THREE.LinearFilter;
   heatmapTexture.needsUpdate = true;
 
   // Create 2D heatmap visualization
@@ -548,7 +550,8 @@ function setupHeatmap(Nx, Ny) {
   const heatmapQuadMat = new THREE.ShaderMaterial({
       uniforms: {
           heatmapTexture: { value: heatmapTexture },
-          opacity: { value: options.clothOpacity }
+          opacity: { value: options.clothOpacity },
+          textureSize: { value: new THREE.Vector2(heatmapWidth, heatmapHeight) }
       },
       vertexShader: `
           varying vec2 vUv;
@@ -560,6 +563,7 @@ function setupHeatmap(Nx, Ny) {
       fragmentShader: `
           uniform sampler2D heatmapTexture;
           uniform float opacity;
+          uniform vec2 textureSize;
           varying vec2 vUv;
 
           vec3 hsv2rgb(vec3 c) {
@@ -568,8 +572,51 @@ function setupHeatmap(Nx, Ny) {
               return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
           }
 
+          // Cubic interpolation function
+          float cubicInterpolation(float v0, float v1, float v2, float v3, float t) {
+              float a0 = v3 - v2 - v0 + v1;
+              float a1 = v0 - v1 - a0;
+              float a2 = v2 - v0;
+              float a3 = v1;
+              return a0 * t * t * t + a1 * t * t + a2 * t + a3;
+          }
+
+          // Sample texture with bicubic interpolation
+          float sampleBicubic(sampler2D tex, vec2 uv) {
+              vec2 texSize = textureSize;
+              vec2 texelSize = 1.0 / texSize;
+              
+              // Get texture coordinates
+              vec2 texCoord = uv * texSize - 0.5;
+              vec2 fxy = fract(texCoord);
+              texCoord = floor(texCoord) * texelSize;
+
+              // Sample 16 nearest texels
+              float p[16];
+              for(int y = -1; y <= 2; y++) {
+                  for(int x = -1; x <= 2; x++) {
+                      vec2 offset = vec2(float(x), float(y)) * texelSize;
+                      vec2 sampleCoord = texCoord + offset;
+                      // Apply wrapping for cylindrical texture
+                      sampleCoord.x = fract(sampleCoord.x);
+                      sampleCoord.y = clamp(sampleCoord.y, 0.0, 1.0);
+                      p[(y+1)*4 + (x+1)] = texture2D(tex, sampleCoord).r;
+                  }
+              }
+
+              // Interpolate
+              float y0 = cubicInterpolation(p[0], p[1], p[2], p[3], fxy.x);
+              float y1 = cubicInterpolation(p[4], p[5], p[6], p[7], fxy.x);
+              float y2 = cubicInterpolation(p[8], p[9], p[10], p[11], fxy.x);
+              float y3 = cubicInterpolation(p[12], p[13], p[14], p[15], fxy.x);
+
+              return cubicInterpolation(y0, y1, y2, y3, fxy.y);
+          }
+
           void main() {
-              float value = texture2D(heatmapTexture, vUv).r;
+              // Use bicubic sampling instead of direct texture lookup
+              float value = sampleBicubic(heatmapTexture, vUv);
+              
               vec3 hsvColor = vec3(
                   (1.0 - value) * 0.6,
                   0.8,
