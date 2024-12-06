@@ -169,17 +169,27 @@ function updateTopBoundaryHeight(height) {
   });
 }
 function removeExistingCloth() {
-  // Remove all particles from the world
+  // Remove particles from physics world
   particles.forEach(row => {
       row.forEach(particle => {
           world.removeBody(particle);
       });
   });
   
-  // Remove all constraints
+  // Remove constraints from physics world
   constraints.forEach(constraint => {
       world.removeConstraint(constraint);
   });
+  
+  // Clear heatmap data
+  if (heatmapTexture) {
+      heatmapTexture.dispose();
+  }
+  
+  // Clear geometry attributes
+  if (clothGeo.attributes.bending) {
+      clothGeo.deleteAttribute('bending');
+  }
   
   // Clear arrays
   particles.length = 0;
