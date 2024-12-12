@@ -5,9 +5,9 @@ import * as dat from 'dat.gui';
 import * as CANNON from 'cannon-es';
 
 const outerRadius = 5;
-let innerRadius = 2.5;
-let Nx = 30;
-let Ny = 30;
+let innerRadius = 3.5;
+let Nx = 20;
+let Ny = 20;
 let cylinderHeight = 40;
 
 const options = {
@@ -19,8 +19,8 @@ const options = {
   innerOpacity: 1.0,
   
   // Physics
-  mass: 0.3,
-  gravity: -9.81,
+  mass: 1.0,
+  gravity: -35,
   damping: 0.5,
   relaxation: 3,
   friction: 0.5,
@@ -87,7 +87,6 @@ groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
 
 // Function to update inner cylinder
 function updateInnerCylinder(radius, height) {
-  // Remove old cylinder body
   world.removeBody(cylinderBody);
   
   // Create new cylinder shape and body
@@ -95,7 +94,6 @@ function updateInnerCylinder(radius, height) {
   cylinderBody.shapes = [newCylinderShape];
   cylinderBody.position.y = height/2;
   
-  // Add body back to world
   world.addBody(cylinderBody);
   
   // Update visual mesh
@@ -124,7 +122,7 @@ let constraints = [];
 const particleRadius = 0.2;
 const particleShape = new CANNON.Sphere(particleRadius);
 const particles = [];
-let topParticles = []; // Array to store top boundary particles
+let topParticles = []; // top boundary
 
 // Create a cylindrical grid of particles
 function createCylindricalGrid() {
@@ -135,7 +133,7 @@ function createCylindricalGrid() {
           const height = (j / Ny) * cylinderHeight;
 
           const particle = new CANNON.Body({
-              mass: j === Ny ? 0 : options.mass, // Make top row particles static
+              mass: j === Ny ? 0 : options.mass, // make top row particles static
               material: particleMaterial,
               shape: particleShape,
               position: new CANNON.Vec3(
@@ -150,7 +148,7 @@ function createCylindricalGrid() {
           particles[i].push(particle);
           world.addBody(particle);
 
-          // Store top boundary particles
+          // top boundary particles
           if (j === Ny) {
               topParticles.push(particle);
           }
@@ -165,41 +163,35 @@ function updateTopBoundaryHeight(height) {
   topParticles.forEach(particle => {
       const currentPos = particle.position;
       particle.position.set(currentPos.x, height, currentPos.z);
-      particle.velocity.set(0, 0, 0); // Reset velocity
+      particle.velocity.set(0, 0, 0); 
   });
 }
 
 function removeExistingCloth() {
-  // Remove particles from physics world
   particles.forEach(row => {
       row.forEach(particle => {
           world.removeBody(particle);
       });
   });
   
-  // Remove constraints from physics world
   constraints.forEach(constraint => {
       world.removeConstraint(constraint);
   });
   
-// Clean up heatmap
 if (heatmapQuad) {
   orthoScene.remove(heatmapQuad);
   heatmapQuad.geometry.dispose();
   heatmapQuad.material.dispose();
 }
 
-  // Clear heatmap data
   if (heatmapTexture) {
       heatmapTexture.dispose();
   }
-  
-  // Clear geometry attributes
+
   if (clothGeo.attributes.bending) {
       clothGeo.deleteAttribute('bending');
   }
   
-  // Clear arrays
   particles.length = 0;
   constraints.length = 0;
   topParticles.length = 0;
@@ -209,11 +201,9 @@ function resetClothSimulation(newNx, newNy) {
   // Remove existing cloth
   removeExistingCloth();
   
-  // Update global variables
   Nx = newNx;
   Ny = newNy;
   
-  // Recalculate distance between particles
   dist = (2 * Math.PI * outerRadius) / Nx;
   
   // Create new geometry
@@ -261,7 +251,6 @@ function resetClothSimulation(newNx, newNy) {
   createConstraints();
 
   if (options.heatmap.enabled) {
-    // Remove old heatmap elements if they exist
     if (heatmapQuad) {
         orthoScene.remove(heatmapQuad);
     }
@@ -386,20 +375,17 @@ window.addEventListener('mousemove', onMouseMove);
 window.addEventListener('mouseup', onMouseUp);
 
 function onMouseDown(event) {
-    // Calculate mouse position
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-    // Check for intersection with light sphere
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObject(lightSphere);
 
     if (intersects.length > 0) {
-        controls.enabled = false; // Disable orbit controls while dragging
+        controls.enabled = false; 
         isDragging = true;
         selectedObject = lightSphere;
 
-        // Create drag plane perpendicular to camera
         const normal = camera.getWorldDirection(new THREE.Vector3());
         dragPlane.setFromNormalAndCoplanarPoint(
             normal,
@@ -411,19 +397,14 @@ function onMouseDown(event) {
 function onMouseMove(event) {
     if (!isDragging || !selectedObject) return;
 
-    // Update mouse position
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-    // Update raycaster
     raycaster.setFromCamera(mouse, camera);
 
-    // Find intersection with drag plane
     if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
-        // Move light sphere to intersection point
         selectedObject.position.copy(intersection);
         
-        // Update directional light position
         dirLight.position.copy(intersection);
         dirLightHelper.update();
 
@@ -443,7 +424,7 @@ function onMouseMove(event) {
 function onMouseUp() {
     isDragging = false;
     selectedObject = null;
-    controls.enabled = true; // Re-enable orbit controls
+    controls.enabled = true; 
 }
 
 
@@ -690,14 +671,6 @@ function createHeatmapMaterial(options) {
   });
 }
 
-// // Create 2D heatmap visualization
-// const heatmapSetup = setupHeatmap(Nx, Ny);
-// const heatmapTexture = heatmapSetup.texture;
-// const heatmapQuad = heatmapSetup.quad;
-// orthoScene.add(heatmapQuad);
-
-// const heatmapClothMat = createHeatmapMaterial(options);
-
 let heatmapTexture;
 let heatmapQuad;
 let heatmapClothMat;
@@ -709,8 +682,6 @@ const standardClothMat = new THREE.MeshStandardMaterial({
   opacity: options.clothOpacity,
   wireframe: false
 });
-
-
 
 // Add bending attribute to geometry
 const bendingAttr = new Float32Array(Nx * (Ny + 1));
@@ -763,9 +734,7 @@ function calculateVertexCurvature(pos, neighbors, originalRadius) {
   for (let k = 0; k < neighbors.length; k++) {
       const v1 = neighbors[k].clone().sub(pos);
       const v2 = neighbors[(k + 1) % neighbors.length].clone().sub(pos);
-      normal.add(v1.cross(v2).normalize());
   }
-  normal.normalize();
 
   // Calculate radial difference
   const currentRadius = new THREE.Vector3(pos.x, 0, pos.z).length();
@@ -841,6 +810,7 @@ appearanceFolder.add(options, 'wireframe').onChange(function(e) {
 appearanceFolder.add(options, 'clothOpacity', 0, 1).onChange(function(e) {
   standardClothMat.opacity = e;
   heatmapClothMat.uniforms.opacity.value = e;
+  requestAnimationFrame(() => radiusController.updateDisplay());
 });
 appearanceFolder.add(options, 'innerOpacity', 0, 1).onChange(function(e) {
   innerCylinderMesh.material.opacity = e;
@@ -883,26 +853,23 @@ geometryFolder.add(options, 'innerHeight', 10, cylinderHeight * 1.5).onChange(fu
     cylinderHeight = e;
     updateInnerCylinder(options.innerRadius, cylinderHeight);
 });
-const radiusController = geometryFolder.add(options, 'radiusSegments', 10, 50).step(1);
+const radiusController = geometryFolder.add(options, 'radiusSegments', 10, 30).step(1);
 radiusController.domElement.addEventListener('mousedown', function() {
     radiusController.updateDisplay();
 });
 radiusController.onChange(function(value) {
     const intValue = Math.floor(value);
     resetClothSimulation(intValue, options.heightSegments);
-    // Force slider position to match value
     requestAnimationFrame(() => radiusController.updateDisplay());
 });
 
-// Add manual value syncing for the height segments slider
-const heightController = geometryFolder.add(options, 'heightSegments', 10, 50).step(1);
+const heightController = geometryFolder.add(options, 'heightSegments', 10, 30).step(1);
 heightController.domElement.addEventListener('mousedown', function() {
     heightController.updateDisplay();
 });
 heightController.onChange(function(value) {
     const intValue = Math.floor(value);
     resetClothSimulation(options.radiusSegments, intValue);
-    // Force slider position to match value
     requestAnimationFrame(() => heightController.updateDisplay());
 });
 
@@ -950,14 +917,11 @@ heatmapFolder.add(options.heatmap, 'enabled')
             if (heatmapQuad) {
                 heatmapQuad.visible = true;
             }
-            
-            // Ensure bending attribute exists
             if (!clothGeo.attributes.bending) {
                 const bendingAttr = new Float32Array(Nx * (Ny + 1));
                 clothGeo.setAttribute('bending', new THREE.BufferAttribute(bendingAttr, 1));
             }
         } else {
-            // Switch back to standard material
             clothMesh.material = standardClothMat;
             if (heatmapQuad) {
                 heatmapQuad.visible = false;
