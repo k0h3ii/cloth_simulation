@@ -1,2 +1,2 @@
-# cloth_simulation
-cloth simulation capstone
+# WebGL cloth simulation 
+cloth simulation made using Three.js and Cannon.js libraries
